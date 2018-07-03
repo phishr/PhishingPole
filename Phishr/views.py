@@ -1,3 +1,4 @@
+from django.db import models
 from django.http import HttpResponse, HttpResponseRedirect, Http404
 from Phishr.models import target, phishr_user
 from django.shortcuts import get_object_or_404, render
@@ -9,26 +10,38 @@ from django.contrib.auth.models import User
 from datetime import datetime
 from Phishr.models import target
 from Phishr.models import phishr_user
+from Phishr.models import campaign_results
 from Phishr.models import campaign_directory
 import hashlib
 import os
 import pickle
 from django.apps import apps
+from django.conf import settings
+import json
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+from django.db import connection as MYSQL_CONNECTION
+import pickle
 
+'''
 for C in campaign_directory.objects.all():
 	exec("global " + C.campaign_name)
 	exec(C.campaign_name+' = apps.get_model("Phishr","'+ C.campaign_name +'")') 
-
-
+'''
 
 ### FUNCTIONS THAT ARE NOT VIEWS ###
 
 #def target_isnt_too_young(target):
 	#check if a target has existed for long enough to have been sent a phishing email
 
+def get_email(name,CID):
+	try:
+		return target.objects.filter(name=name,company_id=CID)[0].email
+	except:
+		return 'NONE'
+
 def create_employee_id(name,CID,campaign_name):
 	return hashlib.sha224(str(name+CID+campaign_name).encode('utf-8')).hexdigest()
-
+'''
 def user_has_trial_targets(user):
 	exec(str(get_company_id(user.username)+'_trial_campaign')+' = apps.get_model("Phishr","'+ str(get_company_id(user.username)+'_trial_campaign') +'")')
 	exec('user_trial_campaign = '+ str(get_company_id(user.username)+'_trial_campaign') +'.objects.all()')
@@ -36,32 +49,32 @@ def user_has_trial_targets(user):
 		return True
 	else:
 		return False
-
+'''
 
 def is_trial_user(user):
 	return phishr_user.objects.filter(username=user.username,company_id=get_company_id(user.username))[0].trial_user
 
-
-
 def campaigns_witnessed(user):
+	a = []
+	b = []
 	return_value = []
-	for campaign in campaign_directory.objects.all():
-		exec('c = '+campaign.campaign_name+'.objects.filter(company_id="'+get_company_id(user.username)+'")')
-		if len(locals()['c']) > 0:
-			return_value.append(campaign)
-		else:
+	for campaign in campaign_results.objects.filter(company_id=get_company_id(user.username)):
+		a.append(campaign)
+
+	for campaign in a:
+		if campaign.campaign_name in b:
 			pass
+		else:
+			return_value.append(campaign)
+			b.append(campaign.campaign_name)
+	
 	return return_value
 
 
 def campaigns_attempted_on_target(target):
 	return_value = []
-	for campaign in campaign_directory.objects.all():
-		exec('c = '+campaign.campaign_name+'.objects.filter(company_id="'+target.company_id+'",name="'+target.name+'")')
-		if len(locals()['c']) > 0:
-			return_value.append(locals()['c'])
-		else:
-			pass
+	for campaign in campaign_results.objects.filter(company_id=target.company_id,name=target.name):
+		return_value.append(campaign)
 	return return_value
 
 
@@ -107,18 +120,12 @@ def replace_chars(string):
 
 
 def data_exists_for_user(user):
-
 	most_recent_campaign = campaign_directory.objects.filter().latest('campaign_date')
-	print("most recent campaign: " + most_recent_campaign.campaign_name)
-	exec( "a = " + most_recent_campaign.campaign_name + ".objects.all()")
-	for t in locals()['a']:
-		if t.company_id == get_company_id(user.username):
-			return True
-		else:
-			pass
-
-	return False
-
+	a = campaign_results.objects.filter(campaign_name=most_recent_campaign.campaign_name,company_id=get_company_id(user.username))
+	if len(a) > 0:
+		return True
+	else:
+		return False
 
 def user_has_targets(user):
 	for t in target.objects.all():
@@ -180,9 +187,8 @@ def name_to_target_object(n,r):
 	return return_value
 
 def get_number_bamboozled(campaign_name,CID,request):
-	exec('CAMPAIGN = ' + str(campaign_name) + '.objects.filter(company_id="'+get_company_id(request.user.username)+'")')
 	return_value = 0
-	for t in locals()['CAMPAIGN']:
+	for t in campaign_results.objects.filter(campaign_name=campaign_name,company_id=CID):
 		if t.clicked_link == True:
 			return_value = return_value + 1
 		else:
@@ -191,12 +197,11 @@ def get_number_bamboozled(campaign_name,CID,request):
 	return return_value
 
 def check_if_bamboozled(T,CAMPAIGN,request):
-	for c in CAMPAIGN:
-		if c.name == T.name:
-			if c.clicked_link:
-				return True
-			else:
-				return False
+	for c in campaign_results.objects.filter(name=T.name,campaign_name=CAMPAIGN.campaign_name,company_id=get_company_id(request.user.username)):
+		if c.clicked_link:
+			return True
+		else:
+			return False
 
 
 def CNAME_TO_CID(string):
@@ -268,16 +273,17 @@ def format_graph_data(request,sign_up_date,individual=False,T=None):
 
 
 def get_time_signed_up(request):
+	#this function is to be used to return NUMBER OF CAMPAIGNS SIGNED UP FOR, NOT NUMBER OF MONTHS SIGNED UP.
+	used = []
 	return_value = 0
-	campaigns = campaign_directory.objects.all()
-	for c in campaigns:
-		exec('TEMP_VALUE = ' + c.campaign_name + '.objects.filter(company_id="'+get_company_id(request.user.username)+'")')
-		for T in locals()['TEMP_VALUE']:
-			if name_to_target_object(T.name,get_company_id(request.user)).company_id == get_company_id(request.user):
-				return_value = return_value + 1
-				break
-			else:
-				continue
+
+	for campaign in campaign_results.objects.filter(company_id=get_company_id(request.user.username)):
+		if campaign.campaign_name not in used:
+			used.append(campaign.campaign_name)
+			return_value = return_value + 1
+		else:
+			pass
+
 	return return_value
 
 ### END FUNCTIONS THAT ARE NOT VIEWS ###
@@ -323,11 +329,11 @@ def dashboard(request):
 				if data_exists_for_user(request.user):
 
 					most_recent_campaign = campaign_directory.objects.filter().latest('campaign_date')
-					exec('recent_list = ' + most_recent_campaign.campaign_name + '.objects.filter(company_id="'+get_company_id(request.user)+'")')
+					recent_list = campaign_results.objects.filter(campaign_name=most_recent_campaign.campaign_name,company_id=get_company_id(request.user.username))
 					recent_vulnerable_targets = 0
 					recent_nonvulnerable_targets = 0
-					for T in locals()['recent_list']:
-						if T.clicked_link:
+					for T in recent_list:
+						if T.clicked_link == True:
 							recent_vulnerable_targets = recent_vulnerable_targets + 1
 						else:
 							recent_nonvulnerable_targets = recent_nonvulnerable_targets + 1
@@ -338,14 +344,14 @@ def dashboard(request):
 					average_nonvulnerable_targets = 0
 					campaigns = campaign_directory.objects.all()
 					for c in campaigns:
-						exec('AAA = ' + c.campaign_name + '.objects.filter(company_id="'+get_company_id(request.user)+'")')
-						for T in locals()['AAA']:
+						all_campaigns = campaign_results.objects.filter(company_id=get_company_id(request.user.username))
+						for T in all_campaigns:
 							if T.clicked_link:
 								average_vulnerable_targets = average_vulnerable_targets + 1
 							else:
 								average_nonvulnerable_targets = average_nonvulnerable_targets + 1
 					
-					#adjust for employee number
+					#average
 					average_vulnerable_targets = average_vulnerable_targets/get_time_signed_up(request)
 					average_nonvulnerable_targets = average_nonvulnerable_targets/get_time_signed_up(request)
 
@@ -416,19 +422,30 @@ def dashboard_individuals(request, target_name=''):
 				
 						clicks = {}
 						
-						for C in campaign_directory.objects.filter(campaign_date__range=[datetime.date(datetime.today()),get_join_date(request.user)]):
-							
-							campaigns.append(C)
+						print('length = :' + str(len(campaign_directory.objects.filter(campaign_date__range=[datetime.date(datetime.today()),get_join_date(request.user)]))))
 
-							try:
+						for C in campaign_directory.objects.all():
+							if C.campaign_date < get_join_date(request.user):
+								pass
+							else:
+								try:
+									print('company_id = '+get_company_id(request.user.username)+"\n name = "+reformat_name(target_name)+"\n campaign_name = "+C.campaign_name)
+									c = campaign_results.objects.filter(company_id=get_company_id(request.user.username),name=reformat_name(target_name),campaign_name=C.campaign_name)
+									clicks[C.campaign_name] = c[0].clicked_link
+									campaigns.append(C)
 
-								exec('c = ' +str(C.campaign_name) + '.objects.filter(company_id="'+get_company_id(request.user.username)+'",name="'+reformat_name(target_name)+'")')
+
+
+								except:
+									pass
 								
-								clicks[C.campaign_name] = locals()['c'][0].clicked_link
-							except:
-								return render(request,'phishr/dashboard/NO_DATA_USER.html')
-								
+						if len(clicks) == 0:
+							return render(request,'phishr/dashboard/NO_DATA_USER.html')
+						else:
+							pass
 
+								
+						print('\n\nreturning clicks = '+ str(clicks) +' \ncampaigns = '+str(campaigns)+"\n\n")
 						return render(request, 'phishr/dashboard/individuals.html',{
 								'clicks': clicks,
 								'campaigns': campaigns,
@@ -576,8 +593,8 @@ def UpdateAccount(request):
 
 					#update phishing campaigns
 					for i in range(len(campaign_directory.objects.all())):
-						exec('CAMPAIGN = operation_test_' + str(i+1) + '.objects.filter(company_id="'+old_company_id+'")')
-						for c in locals()['CAMPAIGN']:
+						CAMPAIGN = campaign_results.objects.filter(company_id=old_company_id)
+						for c in CAMPAIGN:
 							if c.company_id == old_company_id:
 								c.company_id = CNAME_TO_CID(new_company_name)
 								c.save()
@@ -653,12 +670,12 @@ def ViewCampaigns(request, campaign_name=''):
 						#let the user see the strategy of the campaign and the information given
 
 						try:
-							exec('individual_campaign = ' + campaign_name + '.objects.filter(company_id="'+get_company_id(request.user.username)+'")')
+							individual_campaign = campaign_results.objects.filter(company_id=get_company_id(request.user.username),campaign_name=campaign_name)
 
 						except:
 							pass
 
-						if 'individual_campaign' not in locals():
+						if len(individual_campaign) <= 0:
 							raise Http404("campaign does not exist")
 
 						else:
@@ -667,7 +684,7 @@ def ViewCampaigns(request, campaign_name=''):
 							vulns_number = 0
 							nonvulns_number = 0
 
-							for T in locals()['individual_campaign'].filter(company_id=get_company_id(request.user.username)):
+							for T in individual_campaign:
 								
 								if T.clicked_link == True:
 									vulns_number = vulns_number + 1
@@ -819,6 +836,29 @@ def create_trial_user(request):
 	return HttpResponse("Create Trial Users Here")
 
 
+@login_required
+def download(request, path=None):
+	if request.user.username == 'admin':
+	    
+	    file_path = os.path.join(settings.MEDIA_ROOT, path)
+	    if os.path.exists(file_path):
+	        with open(file_path, 'rb') as fh:
+	            response = HttpResponse(fh.read(), content_type="application/vnd.ms-excel")
+	            response['Content-Disposition'] = 'inline; filename=' + os.path.basename(file_path)
+	            return response
+	    raise Http404
+	
+	else:
+		return HttpResponseRedirect('dashboard')
+
+
+class new_model():
+	name = models.CharField(max_length=75)
+	company_id = models.CharField(max_length=100)
+	clicked_link = models.BooleanField(default=False)
+	employee_id = models.CharField(max_length=64,default='DEFAULT')
+
+
 @login_required(login_url='/login/')
 def CampaignManager(request):
 	if request.user.username == 'admin':
@@ -828,47 +868,30 @@ def CampaignManager(request):
 			campaign_description = request.POST['description']
 
 			print('cerating new campaign: ' + campaign_name)
-			new_campaign = campaign_directory(campaign_date=datetime.date(datetime.today()),campaign_name=campaign_name,description=campaign_description)
 
+			new_campaign = campaign_directory(campaign_date=datetime.date(datetime.today()),campaign_name=campaign_name,description=campaign_description)
 			new_campaign.save()
 
-			os.system('python new_campaign.py '+ campaign_name)
+			#fill campaign results here
+			for t in target.objects.all():
+				a = campaign_results(campaign_name=campaign_name,name=t.name,company_id=t.company_id,employee_id=create_employee_id(t.name,t.company_id,campaign_name))
+				a.save()
 
+			return render(request,"phishr/CampaignManager.html",{
+				'error_message': 'campaign successfully added',
+				})
 
-
-			return render(request, 'phishr/CampaignManager.html')
 
 		else:
 
-			error_message = []
-			for campaign in campaign_directory.objects.all():
-				exec("C = "+ campaign.campaign_name +".objects.all()")
-				if len(locals()['C']) < 1:
-					print("updating new campaign: "+campaign.campaign_name)
-					for T in target.objects.all():
-						exec("new_target = "+campaign.campaign_name+"(name='"+str(T.name)+"',company_id='"+str(T.company_id)+"')")
-						locals()["new_target"].save()
-					error_message.append(str('added targets to '+ campaign.campaign_name))
-				
-				exec('c = '+ campaign.campaign_name+".objects.filter(employee_id='DEFAULT')")
-				
-				if len(locals()['c']) > 0:
-					for t in locals()['c']:
-						t.employee_id = create_employee_id(t.name,t.company_id,campaign.campaign_name)
-						t.save()
-					error_message.append(str('added company ID for every user in '+campaign.campaign_name ))
+			return render(request, 'phishr/CampaignManager.html')
 
-			print(request.POST)
-
-			return render(request,"phishr/CampaignManager.html",{
-				'error_message': ' and '.join(error_message),
-				})
 
 
 
 	else:
 		return HttpResponseRedirect("/dashboard/")
-
+'''
 @login_required(login_url='/login/')
 def trial(request):
 
@@ -913,6 +936,7 @@ def trial(request):
 
 	else:
 		return HttpResponseRedirect("/dashboard/")
+'''
 
 @login_required(login_url='/login/')
 def ChangePassword(request,userid=''):
@@ -964,19 +988,17 @@ def PHISHED(request,employee_id=''):
 	#The Id will be the hash of the campaign name + the targets name together
 	#this is the code for when a target clicks on a phishinhg link\
 	if employee_id != '':
-		for campaign in campaign_directory.objects.all():
-			exec("c = "+campaign.campaign_name+".objects.all()")
-			for target in locals()['c']:
-				if target.employee_id == employee_id:
-					target.clicked_link = True
-					target.save()
+		for target in campaign_results.objects.all():
+			if target.employee_id == employee_id:
+				target.clicked_link = True
+				target.save()
 
-					return render(request, 'phishr/PHISHED.html',{
-						'target': name_to_target_object(target.name,target.company_id)
-						})
+				return render(request, 'phishr/PHISHED.html',{
+					'target': name_to_target_object(target.name,target.company_id)
+					})
 
-				else:
-					pass
+			else:
+				pass
 		return Http404()
 	else:
 		HttpResponseRedirect("/")
@@ -988,8 +1010,14 @@ def DELETEME(request):
 	for campaign in campaign_directory.objects.all():
 		exec('c = '+campaign.campaign_name+'.objects.all()')
 		for t in locals()['c']:
-			t.employee_id = 'DEFAULT'
-			t.save()
+			a = campaign_results()
+			a.name = t.name
+			a.campaign_name = campaign.campaign_name
+			a.company_id = t.company_id
+			a.clicked_link = t.clicked_link
+			a.employee_id = create_employee_id(t.name,t.company_id,campaign.campaign_name)
+			a.save()
+
 
 	return HttpResponse("done")
 
@@ -997,6 +1025,7 @@ def DELETEME(request):
 
 def beta_signup(request):
 	return HttpResponse('beta_signup')
+
 
 
 '''

@@ -14,7 +14,7 @@ urlpatterns = [
     path('PHISHED/',views.PHISHED,name='PHISHED'),
     path('PHISHED/<employee_id>/',views.PHISHED,name='PHISHED'),
     path('admin_dashboard/',views.admin_dashboard,name='admin_dashboard'),
-    path('dashboard/trial/', views.trial, name='trial'),
+    #path('dashboard/trial/', views.trial, name='trial'),
     path('dashboard/individuals/',views.dashboard_individuals,name='dashboard_individuals'),
     path('dashboard/individuals/<target_name>/',views.dashboard_individuals,name='dashboard_individuals'),
     path('dashboard/AddEmployees/', views.AddEmployees,name='AddEmployees'),
@@ -23,6 +23,7 @@ urlpatterns = [
     path('dashboard/campaigns/', views.ViewCampaigns,name='ViewCampaigns'),
     path('dashboard/campaigns/<campaign_name>/', views.ViewCampaigns,name='ViewCampaigns'),
     path('CampaignManager/',views.CampaignManager,name="CampaignManager"),
+    #path('CampaignManager/download/<path>/',views.download,name="download"),
 
     #path('deleteme/',views.DELETEME,name='deleteme')
 ]
